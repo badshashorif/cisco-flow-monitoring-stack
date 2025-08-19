@@ -1,0 +1,60 @@
+
+version: "3.8"
+
+services:
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.8
+    container_name: ch-flow
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - ./clickhouse/init:/docker-entrypoint-initdb.d
+      - chdata:/var/lib/clickhouse
+    ports:
+      - "9000:9000"   # native protocol
+      - "8123:8123"   # HTTP
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    container_name: grafana-flow
+    environment:
+      - GF_INSTALL_PLUGINS=grafana-clickhouse-datasource
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - gdata:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - clickhouse
+    restart: unless-stopped
+
+  # NetFlow/IPFIX collector with BGP enrichment
+  nfacctd:
+    image: pmacct/pmacct:latest
+    container_name: nfacctd
+    network_mode: host                     # so the router can reach UDP/2055 and BGP/179 directly
+    volumes:
+      - ./pmacct/nfacctd.conf:/etc/pmacct/nfacctd.conf:ro
+      - ./pmacct/bgp_neighbors.conf:/etc/pmacct/bgp_neighbors.conf:ro
+    command: ["/bin/sh", "-c", "nfacctd -f /etc/pmacct/nfacctd.conf -D"]
+    restart: unless-stopped
+
+  # sFlow collector (optional). If you use sFlow on the router, enable this.
+  sfacctd:
+    image: pmacct/pmacct:latest
+    container_name: sfacctd
+    network_mode: host                     # so the router can reach UDP/6343 and BGP/179 if used
+    volumes:
+      - ./pmacct/sfacctd.conf:/etc/pmacct/sfacctd.conf:ro
+      - ./pmacct/bgp_neighbors.conf:/etc/pmacct/bgp_neighbors.conf:ro
+    command: ["/bin/sh", "-c", "sfacctd -f /etc/pmacct/sfacctd.conf -D"]
+    restart: unless-stopped
+    # comment out the whole service if you won't use sFlow
+
+volumes:
+  chdata:
+  gdata:
